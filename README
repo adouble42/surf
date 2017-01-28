@@ -1,3 +1,5 @@
+binary deb - http://mrn.sixbit.org/files/surf_0.7-1.2_i386.deb
+
 surf - simple webkit-based browser
 ==================================
 surf is a simple Web browser based on WebKit/GTK+.
@@ -8,29 +10,18 @@ for now, it's a fork of surf that lets you switch in and out of strict SSL
 mode at will (-yY on the command line, ctrl-shift-y in browsing), with the
 regex patch and some debian patches integrated. the regex patch is from
 the suckless page, although in the end i only appropriated the majority of
-that, as well. little different. the regex here instead of redirecting you
-to about:blank, decides what user agent to send out.
+that, as well. the regex here instead of redirecting you to about:blank,
+decides what user agent to send out.
 i've got a project using this as a tor browser behind a transparent proxy on
 separate hardware, surf has long been supplanting TBB as my preferred browser
 in the live system the proxy PXE boots to ethernet clients.
 the user agent trick, i figure to be an advantage for a couple of reasons.
 first off, it's controlled by regex filters which can be configured for
 anything you'd like.
-the configuration i'm using, has a flat file of common user agents found
-on the internet. i had 140 of them in there at first, but i scaled back
-in favor of 20 or 30 good ones, which i defined as, those sites that try
-to fingerprint your fonts with CSS, have seen them more than once.
-so the general rule, random user agents. now, regarding the fonts.
 i've taken a hint from tor, and also their bundled fonts. using surf-fork
 in conjunction with Firejail, some scripts, and fluxfonts (github, 
-da2x/fluxfonts), we can fake a bit of a TBB on the dark side of the internet,
-blend in as one of their agents, and seamlessly the regex switches up the
-user agent for any non onion sites where we don't want to be part of that
-crowd so much. at least, on paper.
-i also use surf to negotiate captive portals and allow it as the unsafe
-browser in a very,very separate instance there.
-once it's ready, it will also be BSD and free.
-for now i'm just going to leave this here.
+da2x/fluxfonts), we can fake it as appropriate.
+i also use surf to negotiate captive portals, in a separate configuration.
 this is also my first foray in to building packages for debian. i wanted to
 stay in the framework as much as possible...at first i found it more
 daunting than actually coding, to package a .deb...i'll put up a source
