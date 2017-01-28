@@ -3,7 +3,7 @@
 surf \- simple webkit-based browser
 .SH SYNOPSIS
 .B surf
-.RB [-bBdDfFgGiIkKmMnNpPsSvx]
+.RB [-yYbBdDfFgGiIkKmMnNpPsSvx]
 .RB [-a\ cookiepolicies]
 .RB [-c\ cookiefile]
 .RB [-e\ xid]
@@ -17,6 +17,21 @@ surf is a simple Web browser based on WebKit/GTK+. It is able
 to display websites and follow links. It supports the XEmbed protocol
 which makes it possible to embed it in another application. Furthermore,
 one can point surf to another URI by setting its XProperties.
+this is no longer entirely surf. this is a bit different, now.
+it is able to toggle between strict and slovenly SSL modes on the fly.
+and, there are some features added to optimize it as part of an
+anonymity and privacy solution. for one, it takes two different user agents
+from the environment - one is to be served a random agent per session
+using shuf, and the other is a fallback that returns a current Tor browser
+agent string when regex detects an onion URI. this is useful with a
+transparent proxy; within the Tor network we seek to blend in with the rest.
+when exit nodes get involved, there's less advantage to that cover.
+if you're not using tor anyway, you'll never notice.
+this browser is also less enthusiastic about CSS and Java when asked to be
+coy.
+thanks to the suckless engineers for writing under 1900 lines of code that
+was understandable enough for me to pick up enough about webkit easily to do
+something useful with it.
 .SH OPTIONS
 .TP
 .B \-a cookiepolicies
@@ -29,6 +44,10 @@ with "A" meaning to
 accept all cookies, "a" to deny all cookies and "@", which tells surf to
 accept no third party cookies.
 .TP
+.B \-y
+Disable strict SSL enforcement (ctrl-shift-y will toggle, in application)
+.B \-Y
+Enable strict SSL enforcement
 .B \-b
 Disable Scrollbars
 .TP
@@ -225,7 +244,7 @@ page.
 Toggle fullscreen mode.
 .SH INDICATORS OF OPERATION
 Surf is showing indicators of operation in front of the site title.
-For all indicators, unless otherwsie specified, a lower case letter means disabled and an upper case letter means enabled.
+For all indicators, unless otherwise specified, a lower case letter means disabled and an upper case letter means enabled.
 .TP
 .B A
 all cookies accepted
@@ -276,13 +295,30 @@ no proxy
 .B P
 using proxy
 .SH ENVIRONMENT
+.B FILTER_USERAGENT
+If this is set on startup, surf will use it as the 
+.I useragent
+string when identifying to sites the regex recognizes as Tor. currently
+that means an onion TLD.
 .B SURF_USERAGENT
 If this variable is set upon startup, surf will use it as the
 .I useragent
-string
+string to identify everywhere else. suggestion is to keep a file with common
+user agents somewhere convenient and have a wrapper use shuf to set it per
+session. firejail is an excellent complement as well, using FONTCONFIG
+in the environment, it's possible to use a separate stripped down set of
+fonts, as one additional counter to browser fingerprinting based on remotely
+inventorying your font collection.
 .TP
 .B http_proxy
 If this variable is set and not empty upon startup, surf will use it as the http proxy
+.TP
+.B no_proxy
+If both http_proxy is set and no_proxy contain a
+.BR comma-separated
+list of domain extensions and both is not empty upon startup, proxy will
+.BR not
+be used for each of the elements in no_proxy.
 .SH PLUGINS
 For using plugins in surf, first determine your running architecture. Then get
 the appropriate plugin for that architecture and copy it to

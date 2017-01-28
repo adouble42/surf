@@ -6,6 +6,7 @@
 #include <X11/X.h>
 #include <X11/Xatom.h>
 #include <gtk/gtk.h>
+#include <gtk/gtkx.h>
 #include <gdk/gdkx.h>
 #include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
@@ -17,18 +18,20 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <webkit/webkit.h>
-#include <glib/gstdio.h>
 #include <JavaScriptCore/JavaScript.h>
+#include <regex.h>
 #include <sys/file.h>
 #include <libgen.h>
 #include <stdarg.h>
 #include <regex.h>
 #include <pwd.h>
-#include <string.h>
+#include <glib.h>
+#include <glib/gstdio.h>
 
 #include "arg.h"
 
 char *argv0;
+regex_t *filter_expressions;
 
 #define LENGTH(x)               (sizeof(x) / sizeof(x[0]))
 #define CLEANMASK(mask)         (mask & (MODKEY|GDK_SHIFT_MASK))
@@ -99,11 +102,11 @@ typedef struct {
 static Display *dpy;
 static Atom atoms[AtomLast];
 static Client *clients = NULL;
-static GdkNativeWindow embed = 0;
+static Window embed = 0;
 static gboolean showxid = FALSE;
 static char winid[64];
 static gboolean usingproxy = 0;
-static char togglestat[9];
+static char togglestat[10];
 static char pagestat[3];
 static GTlsDatabase *tlsdb;
 static int policysel = 0;
@@ -146,6 +149,8 @@ static void destroyclient(Client *c);
 static void destroywin(GtkWidget* w, Client *c);
 static void die(const char *errstr, ...);
 static void eval(Client *c, const Arg *arg);
+static bool filter_init(void);
+static bool filter_request(const gchar *uri);
 static void find(Client *c, const Arg *arg);
 static void fullscreen(Client *c, const Arg *arg);
 static void geopolicyrequested(WebKitWebView *v, WebKitWebFrame *f,
@@ -205,6 +210,7 @@ static void toggle(Client *c, const Arg *arg);
 static void togglecookiepolicy(Client *c, const Arg *arg);
 static void togglegeolocation(Client *c, const Arg *arg);
 static void togglescrollbars(Client *c, const Arg *arg);
+static void togglessl(Client *c, const Arg *arg);
 static void togglestyle(Client *c, const Arg *arg);
 static void updatetitle(Client *c);
 static void updatewinid(Client *c);
@@ -237,10 +243,23 @@ beforerequest(WebKitWebView *w, WebKitWebFrame *f, WebKitWebResource *r,
 	      Client *c)
 {
 	const gchar *uri = webkit_network_request_get_uri(req);
+        WebKitWebSettings *settings = webkit_web_view_get_settings(c->view);
+	char *ua;
 	int i, isascii = 1;
+
 
 	if (g_str_has_suffix(uri, "/favicon.ico"))
 		webkit_network_request_set_uri(req, "about:blank");
+
+	settings = webkit_web_view_get_settings(c->view);
+
+	if (filter_request(uri)) {
+            ua = getenv("FILTER_USERAGENT");
+	    g_object_set(G_OBJECT(settings), "user-agent", ua, NULL);
+	} else {
+            ua = getenv("SURF_USERAGENT");
+            g_object_set(G_OBJECT(settings), "user-agent", ua, NULL);
+        }
 
 	if (!g_str_has_prefix(uri, "http://")
 	    && !g_str_has_prefix(uri, "https://")
@@ -259,6 +278,50 @@ beforerequest(WebKitWebView *w, WebKitWebFrame *f, WebKitWebResource *r,
 			handleplumb(c, w, uri);
 	}
 }
+
+static bool
+filter_init(void) {
+        bool errors = false;
+        char *errorbuf;
+
+        errorbuf = malloc(sizeof(char) * BUFSIZ);
+        filter_expressions = malloc(sizeof(regex_t) * LENGTH(filter_patterns));
+
+        for (off_t idx = 0; idx < LENGTH(filter_patterns); idx++) {
+                char *pat = filter_patterns[idx];
+                int err = regcomp(&filter_expressions[idx], pat,
+                                            REG_EXTENDED | REG_ICASE | REG_NOSUB);
+                if (err != 0) {
+                        /* regerror always ends messages with 0x00 */
+                        (void) regerror(err, &filter_expressions[idx], errorbuf, BUFSIZ);
+                        fprintf(stderr, "Failed to compile \"%s\": %s\n", pat, errorbuf);
+                        errors = true;
+                }
+        }
+
+        free(errorbuf);
+        return !errors;
+}
+
+static bool
+filter_request(const gchar *uri) {
+        if (!strcmp(uri, "about:blank"))
+                return false;
+        for (off_t idx = 0; idx < LENGTH(filter_patterns); idx++) {
+                if (regexec(&filter_expressions[idx], uri, 0, NULL, 0) == REG_NOMATCH) {
+                        continue;
+                }
+#ifdef FILTER_VERBOSE
+                fprintf(stderr, "filtering \"%s\"\n", uri);
+#endif
+                return true;
+        }
+#ifdef FILTER_VERBOSE
+        fprintf(stderr, "not filtering \"%s\"\n", uri);
+#endif
+        return false;
+}
+
 
 char *
 buildfile(const char *path)
@@ -625,7 +688,7 @@ getatom(Client *c, int a)
 	unsigned long ldummy;
 	unsigned char *p = NULL;
 
-	XGetWindowProperty(dpy, GDK_WINDOW_XID(GTK_WIDGET(c->win)->window),
+	XGetWindowProperty(dpy, GDK_WINDOW_XID(gtk_widget_get_window(GTK_WIDGET(c->win))),
 	                   atoms[a], 0L, BUFSIZ, False, XA_STRING,
 	                   &adummy, &idummy, &ldummy, &ldummy, &p);
 	if (p)
@@ -803,6 +866,7 @@ loadstatuschange(WebKitWebView *view, GParamSpec *pspec, Client *c)
 			               & SOUP_MESSAGE_CERTIFICATE_TRUSTED);
 		}
 		setatom(c, AtomUri, uri);
+		c->title = copystr(&c->title, uri);
 
 		if (enablestyle)
 			setstyle(c, getstyle(uri));
@@ -870,6 +934,7 @@ newclient(void)
 	WebKitWebFrame *frame;
 	GdkGeometry hints = { 1, 1 };
 	GdkScreen *screen;
+	GdkWindow *window;
 	gdouble dpi;
 	char *ua;
 
@@ -911,10 +976,11 @@ newclient(void)
 		addaccelgroup(c);
 
 	/* Pane */
-	c->pane = gtk_vpaned_new();
+	c->pane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
 
 	/* VBox */
-	c->vbox = gtk_vbox_new(FALSE, 0);
+	c->vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_set_homogeneous(c->vbox, FALSE);
 	gtk_paned_pack1(GTK_PANED(c->pane), c->vbox, TRUE, TRUE);
 
 	/* Webview */
@@ -996,13 +1062,15 @@ newclient(void)
 	gtk_widget_show(c->win);
 	gtk_window_set_geometry_hints(GTK_WINDOW(c->win), NULL, &hints,
 	                              GDK_HINT_MIN_SIZE);
-	gdk_window_set_events(GTK_WIDGET(c->win)->window, GDK_ALL_EVENTS_MASK);
-	gdk_window_add_filter(GTK_WIDGET(c->win)->window, processx, c);
+	window = gtk_widget_get_parent_window(GTK_WIDGET(c->win));
+	gdk_window_set_events(window, GDK_ALL_EVENTS_MASK);
+	gdk_window_add_filter(window, processx, c);
 	webkit_web_view_set_full_content_zoom(c->view, TRUE);
 
-	runscript(frame);
-
 	settings = webkit_web_view_get_settings(c->view);
+	if (enablescripts) {
+	   runscript(frame);
+	}
 	if (!(ua = getenv("SURF_USERAGENT")))
 		ua = useragent;
 	g_object_set(G_OBJECT(settings), "user-agent", ua, NULL);
@@ -1031,7 +1099,7 @@ newclient(void)
 	 * It is equivalent to firefox's "layout.css.devPixelsPerPx" setting.
 	 */
 	if (zoomto96dpi) {
-		screen = gdk_window_get_screen(GTK_WIDGET(c->win)->window);
+		screen = gdk_window_get_screen(window);
 		dpi = gdk_screen_get_resolution(screen);
 		if (dpi != -1) {
 			g_object_set(G_OBJECT(settings),
@@ -1070,7 +1138,7 @@ newclient(void)
 	if (showxid) {
 		gdk_display_sync(gtk_widget_get_display(c->win));
 		printf("%u\n",
-		       (guint)GDK_WINDOW_XID(GTK_WIDGET(c->win)->window));
+		       (guint)GDK_WINDOW_XID(window));
 		fflush(NULL);
                 if (fclose(stdout) != 0) {
 			die("Error closing stdout");
@@ -1281,7 +1349,7 @@ void
 setatom(Client *c, int a, const char *v)
 {
 	XSync(dpy, False);
-	XChangeProperty(dpy, GDK_WINDOW_XID(GTK_WIDGET(c->win)->window),
+	XChangeProperty(dpy, GDK_WINDOW_XID(gtk_widget_get_window(GTK_WIDGET(c->win))),
 	                atoms[a], XA_STRING, 8, PropModeReplace,
 	                (unsigned char *)v, strlen(v) + 1);
 }
@@ -1290,9 +1358,9 @@ void
 setup(void)
 {
 	int i;
-	char *proxy, *new_proxy;
+	char *proxy, *new_proxy, *no_proxy, **new_no_proxy;
 	char *styledirfile, *stylepath;
-	SoupURI *puri;
+	GProxyResolver *pr;
 	SoupSession *s;
 	GError *error = NULL;
 
@@ -1300,7 +1368,7 @@ setup(void)
 	sigchld(0);
 	gtk_init(NULL, NULL);
 
-	dpy = GDK_DISPLAY();
+	dpy = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
 
 	/* atoms */
 	atoms[AtomFind] = XInternAtom(dpy, "_SURF_FIND", False);
@@ -1367,16 +1435,24 @@ setup(void)
 	/* proxy */
 	if ((proxy = getenv("http_proxy")) && strcmp(proxy, "")) {
 		new_proxy = g_strrstr(proxy, "http://")
+			    || g_strrstr(proxy, "https://")
 		            || g_strrstr(proxy, "socks://")
 		            || g_strrstr(proxy, "socks4://")
+		            || g_strrstr(proxy, "socks4a://")
 		            || g_strrstr(proxy, "socks5://")
 		            ? g_strdup(proxy)
 		            : g_strdup_printf("http://%s", proxy);
-		puri = soup_uri_new(new_proxy);
-		g_object_set(G_OBJECT(s), "proxy-uri", puri, NULL);
-		soup_uri_free(puri);
+		new_no_proxy = ((no_proxy = getenv("no_proxy")) && strcmp(no_proxy, ""))
+			? g_strsplit(no_proxy, ",", -1) : NULL;
+		pr = g_simple_proxy_resolver_new(new_proxy, new_no_proxy);
+		g_object_set(G_OBJECT(s), "proxy-resolver", pr, NULL);
 		g_free(new_proxy);
+		g_strfreev(new_no_proxy);
 		usingproxy = 1;
+	}
+
+	if (!filter_init()) {
+		die("Failed to compile one or more filter expressions\n");
 	}
 }
 
@@ -1542,6 +1618,22 @@ togglestyle(Client *c, const Arg *arg)
 }
 
 void
+togglessl(Client *c, const Arg *arg)
+{
+	SoupSession *s;
+        Arg a = { .b = FALSE };
+        s = webkit_get_default_session();
+
+        strictssl = !strictssl;
+
+        g_object_set(G_OBJECT(s), "ssl-strict", strictssl, NULL);
+
+        updatetitle(c);
+	reload(c, &a);
+}
+
+
+void
 gettogglestat(Client *c)
 {
 	gboolean value;
@@ -1568,6 +1660,8 @@ gettogglestat(Client *c)
 	togglestat[p++] = value? 'V': 'v';
 
 	togglestat[p++] = enablestyle ? 'M': 'm';
+
+	togglestat[p++] = strictssl ? 'Y': 'y';
 
 	togglestat[p] = '\0';
 }
@@ -1619,13 +1713,13 @@ void
 updatewinid(Client *c)
 {
 	snprintf(winid, LENGTH(winid), "%u",
-	         (int)GDK_WINDOW_XID(GTK_WIDGET(c->win)->window));
+	         (int)GDK_WINDOW_XID(gtk_widget_get_window(GTK_WIDGET(c->win))));
 }
 
 void
 usage(void)
 {
-	die("usage: %s [-bBdDfFgGiIkKmMnNpPsSvx] [-a cookiepolicies ] "
+	die("usage: %s [-yYbBdDfFgGiIkKmMnNpPsSvx] [-a cookiepolicies ] "
 	    "[-c cookiefile] [-e xid] [-r scriptfile] [-t stylefile] "
 	    "[-u useragent] [-z zoomlevel] [uri]\n", basename(argv0));
 }
@@ -1747,6 +1841,12 @@ main(int argc, char *argv[])
 		    "see LICENSE for details\n");
 	case 'x':
 		showxid = TRUE;
+		break;
+	case 'y':
+		strictssl = FALSE;
+		break;
+	case 'Y':
+		strictssl = TRUE;
 		break;
 	case 'z':
 		zoomlevel = strtof(EARGF(usage()), NULL);
