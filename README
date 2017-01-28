@@ -16,20 +16,13 @@ one in response to regex, and one for everyone else.
 i've got a project using this as a tor browser behind a transparent proxy on
 separate hardware, surf has long been supplanting TBB as my preferred browser
 in the live system the proxy PXE boots to ethernet clients.
-the user agent trick, i figure to be an advantage for a couple of reasons.
-first off, it's controlled by regex filters which can be configured for
-anything you'd like.
 i've taken a hint from tor, and also their bundled fonts. using surf-fork
 in conjunction with Firejail, some scripts, and fluxfonts (github, 
-da2x/fluxfonts), we can fake it as appropriate.
-i also use surf to negotiate captive portals, in a separate configuration.
+da2x/fluxfonts), we can fake it a little in a crowd.
 this is also my first foray in to building packages for debian. i wanted to
-stay in the framework as much as possible...at first i found it more
-daunting than actually coding, to package a .deb...i'll put up a source
-package soon, the binary here is i386. i need to generate another source
-package later, my one and only problem was on completion, and it's not really
-a problem. i moved a file or touched it or something inane.
-so as far as dependencies go...webkit, gtk...or pull the source deb for surf,
+stay in the framework as much as possible... the live system is based on
+xubuntu xenial, i386.
+as far as dependencies go...webkit, gtk...or pull the source deb for surf,
 push all the diffs on with quilt, add another one, and put these limes in
 that coconut.
 
