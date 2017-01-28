@@ -11,7 +11,8 @@ mode at will (-yY on the command line, ctrl-shift-y in browsing), with the
 regex patch and some debian patches integrated. the regex patch is from
 the suckless page, although in the end i only appropriated the majority of
 that, as well. the regex here instead of redirecting you to about:blank,
-decides what user agent to send out.
+decides what user agent to send out. it'll take two, from the environment.
+one in response to regex, and one for everyone else.
 i've got a project using this as a tor browser behind a transparent proxy on
 separate hardware, surf has long been supplanting TBB as my preferred browser
 in the live system the proxy PXE boots to ethernet clients.
